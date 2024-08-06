@@ -5,8 +5,10 @@ import pya
 import svgpathtools
 
 input_gds = 'inputs/tt_um_tiny_shader_mole99.gds'
-outline_svg = 'inputs/outline.svg'
+outline_mask_svg = 'inputs/outline_mask.svg'
+outline_support_svg = 'inputs/outline_support.svg'
 front_silkscreen_extra_svg = 'inputs/front_silkscreen_extra.svg'
+back_silkscreen_extra_svg = 'inputs/back_silkscreen_extra.svg'
 step_1_gds = 'outputs/step_1.gds'
 step_2_gds = 'outputs/step_2.gds'
 step_3_gds = 'outputs/step_3.gds'
@@ -25,6 +27,7 @@ hatch_raster = 0.3
 hatch_fine = 0.05
 hatch_thick = 0.15
 pad_to_silk = 0.05
+pad_to_extra_silk = 0.5
 circle_radius_ext = 0.105
 circle_radius_int = 0.05
 circle_points = 64
@@ -222,13 +225,29 @@ def load_svg(file):
 
     return region, svg_attributes
 
-outline_region, outline_svg_attributes = load_svg(outline_svg)
+outline_mask_region, outline_svg_attributes = load_svg(outline_mask_svg)
+outline_support_region, _ = load_svg(outline_support_svg)
 front_silkscreen_extra_region, _ = load_svg(front_silkscreen_extra_svg)
-safe_region = (outline_region-front_silkscreen_extra_region).sized(-edge_margin/dbu)
+back_silkscreen_extra_region, _ = load_svg(back_silkscreen_extra_svg)
+safe_region = (outline_support_region & outline_mask_region).sized(-edge_margin/dbu)
+drill_exclude_region = safe_region - (front_silkscreen_extra_region+back_silkscreen_extra_region).sized(pad_to_extra_silk*transform_resize/dbu)
 
-drill_points = [i for i in drill_points if (pya.Region(circle_ext.moved(i.to_v().to_itype(dbu))) - safe_region).is_empty()]
+drill_points_kept = []
+drill_points_masked = []
+for i in drill_points:
+    drill_circle = pya.Region(circle_ext.moved(i.to_v().to_itype(dbu)))
+    if (drill_circle - safe_region).is_empty():
+        if (drill_circle - drill_exclude_region).is_empty():
+            drill_points_kept.append(i)
+        else:
+            drill_points_masked.append(i)
 
-edge_cuts = outline_region
+drill_points = drill_points_kept
+drill_mask = pya.Region()
+for i in drill_points_masked:
+    drill_mask += pya.Region(circle_int.moved(i.to_v().to_itype(dbu)))
+
+edge_cuts = outline_support_region
 back_silkscreen &= safe_region
 back_mask &= safe_region
 back_copper &= safe_region
@@ -237,7 +256,18 @@ front_copper &= safe_region
 front_mask &= safe_region
 front_silkscreen &= safe_region
 
-front_silkscreen |= front_silkscreen_extra_region
+back_copper -= drill_mask
+front_copper -= drill_mask
+
+back_mask -= back_silkscreen_extra_region.sized(pad_to_extra_silk/dbu)
+back_silkscreen -= back_silkscreen_extra_region.sized(pad_to_extra_silk/dbu)
+back_silkscreen += back_silkscreen_extra_region
+front_mask -= front_silkscreen_extra_region.sized(pad_to_extra_silk/dbu)
+front_silkscreen -= front_silkscreen_extra_region.sized(pad_to_extra_silk/dbu)
+front_silkscreen += front_silkscreen_extra_region
+
+back_mask += outline_support_region - outline_mask_region
+front_mask += outline_support_region - outline_mask_region
 
 copy_shapes(edge_cuts, tap_drawing)
 copy_shapes(back_silkscreen, diff_drawing)
