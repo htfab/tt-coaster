@@ -6,6 +6,7 @@ import svgpathtools
 
 input_gds = 'inputs/tt_um_tiny_shader_mole99.gds'
 outline_svg = 'inputs/outline.svg'
+front_silkscreen_extra_svg = 'inputs/front_silkscreen_extra.svg'
 step_1_gds = 'outputs/step_1.gds'
 step_2_gds = 'outputs/step_2.gds'
 step_3_gds = 'outputs/step_3.gds'
@@ -116,13 +117,18 @@ in_active_hatch += in_difftap_n & hatch_pattern(True, hatch_raster, hatch_fine, 
 in_active_hatch += in_difftap_p & in_region(poly_drawing) & hatch_pattern(False, hatch_raster, hatch_thick, 0)
 in_active_hatch += in_difftap_n & in_region(poly_drawing) & hatch_pattern(True, hatch_raster, hatch_thick, 0)
 
-back_silkscreen = in_active_hatch - drill_region_ext.sized(pad_to_silk/dbu)
-back_mask = in_region(poly_drawing) - in_difftap.sized(pad_to_silk/dbu) + drill_region_ext
+back_silkscreen = in_active_hatch
+back_mask = in_region(poly_drawing)
 back_copper = in_region(li1_drawing)
 drills = drill_region_int
 front_copper = in_region(li1_drawing)
-front_mask = in_region(met1_drawing) - in_region(met2_drawing).sized(pad_to_silk/dbu) + drill_region_ext
-front_silkscreen = in_region(met2_drawing) - drill_region_ext.sized(pad_to_silk/dbu)
+front_mask = in_region(met1_drawing)
+front_silkscreen = in_region(met2_drawing)
+
+back_silkscreen -= drill_region_ext.sized(pad_to_silk/dbu)
+back_mask -= back_silkscreen.sized(pad_to_silk/dbu)
+front_silkscreen -= drill_region_ext.sized(pad_to_silk/dbu)
+front_mask -= front_silkscreen.sized(pad_to_silk/dbu)
 
 copy_shapes(back_silkscreen, diff_drawing)
 copy_shapes(back_mask, poly_drawing)
@@ -181,26 +187,26 @@ out_layout.write(step_2_gds)
 out_layout = pya.Layout()
 out_top = out_layout.cell(out_layout.add_cell('top'))
 
-outline_paths, outline_attributes, outline_svg_attributes = svgpathtools.svg2paths2(outline_svg)
-outline_polygons = []
-for path in outline_paths:
-    for subpath in path.continuous_subpaths():
-        current_polygon = []
-        for seg in subpath:
-            if not current_polygon:
-                current_polygon = [seg.start]
-            while True:
-                if type(seg) == svgpathtools.path.Line or seg.length() < svg_bez_segment:
-                    current_polygon.append(seg.end)
-                    break
-                pos = seg.ilength(svg_bez_segment)
-                _, seg = seg.split(pos)
-                current_polygon.append(seg.start)
-        outline_polygons.append(current_polygon)
+def load_svg(file):
+    paths, attributes, svg_attributes = svgpathtools.svg2paths2(file)
+    polygons = []
+    for path in paths:
+        for subpath in path.continuous_subpaths():
+            current_polygon = []
+            for seg in subpath:
+                if not current_polygon:
+                    current_polygon = [seg.start]
+                while True:
+                    if type(seg) == svgpathtools.path.Line or seg.length() < svg_bez_segment:
+                        current_polygon.append(seg.end)
+                        break
+                    pos = seg.ilength(svg_bez_segment)
+                    _, seg = seg.split(pos)
+                    current_polygon.append(seg.start)
+            polygons.append(current_polygon)
 
-def get_svg_region(polygons):
     all_points = [p for polygon in polygons for p in polygon]
-    min_x, min_y, width, height = map(float, outline_svg_attributes['viewBox'].split())
+    min_x, min_y, width, height = map(float, svg_attributes['viewBox'].split())
     (lx, by), (rx, ty) = output_rect
     scale_x = (rx-lx)/width
     scale_y = (ty-by)/height
@@ -213,10 +219,12 @@ def get_svg_region(polygons):
             points.append(pya.DPoint(lx + (p.real-min_x)*scale_x, ty - (p.imag-min_y)*scale_y))
         shapes.insert(pya.DPolygon(points).to_itype(dbu))
         region ^= pya.Region(shapes)
-    return region
 
-outline_region = get_svg_region(outline_polygons)
-safe_region = outline_region.sized(-edge_margin/dbu)
+    return region, svg_attributes
+
+outline_region, outline_svg_attributes = load_svg(outline_svg)
+front_silkscreen_extra_region, _ = load_svg(front_silkscreen_extra_svg)
+safe_region = (outline_region-front_silkscreen_extra_region).sized(-edge_margin/dbu)
 
 drill_points = [i for i in drill_points if (pya.Region(circle_ext.moved(i.to_v().to_itype(dbu))) - safe_region).is_empty()]
 
@@ -228,6 +236,8 @@ drills &= safe_region
 front_copper &= safe_region
 front_mask &= safe_region
 front_silkscreen &= safe_region
+
+front_silkscreen |= front_silkscreen_extra_region
 
 copy_shapes(edge_cuts, tap_drawing)
 copy_shapes(back_silkscreen, diff_drawing)
