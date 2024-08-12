@@ -117,8 +117,8 @@ in_difftap_p = in_difftap & in_region(psdm_drawing)
 in_difftap_n = in_difftap & in_region(nsdm_drawing)
 in_active_hatch = in_difftap_p & hatch_pattern(False, hatch_raster, hatch_fine, (hatch_thick-hatch_fine)/2)
 in_active_hatch += in_difftap_n & hatch_pattern(True, hatch_raster, hatch_fine, (hatch_thick-hatch_fine)/2)
-in_active_hatch += in_difftap_p & in_region(poly_drawing) & hatch_pattern(False, hatch_raster, hatch_thick, 0)
-in_active_hatch += in_difftap_n & in_region(poly_drawing) & hatch_pattern(True, hatch_raster, hatch_thick, 0)
+in_active_hatch += (in_difftap_p - in_region(poly_drawing)) & hatch_pattern(False, hatch_raster, hatch_thick, 0)
+in_active_hatch += (in_difftap_n - in_region(poly_drawing)) & hatch_pattern(True, hatch_raster, hatch_thick, 0)
 
 back_silkscreen = in_active_hatch
 back_mask = in_region(poly_drawing)
